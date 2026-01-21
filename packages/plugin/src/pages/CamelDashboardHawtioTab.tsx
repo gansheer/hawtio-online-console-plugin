@@ -10,15 +10,7 @@ import './hawtiomaintab.css'
 import { stack } from '../utils'
 import { log } from '../globals'
 import { ConsoleLoading } from './ConsoleLoading'
-
-interface CamelAppPod {
-  name: string
-  ready: string
-  phase: string
-  restarts: string
-  uid?: string
-  namespace?: string
-}
+import { useK8sWatchResources } from '@openshift-console/dynamic-plugin-sdk'
 
 interface CamelApp {
   metadata?: {
@@ -26,8 +18,17 @@ interface CamelApp {
     namespace?: string
     uid?: string
   }
+  spec?: {
+    selector?: {
+      matchLabels?: Record<string, string>
+    }
+  }
   status?: {
-    pods?: CamelAppPod[]
+    pods?: Array<{
+      name: string
+      ready: boolean
+      status: string
+    }>
     phase?: string
   }
 }
@@ -37,52 +38,50 @@ interface CamelDashboardHawtioTabProps {
   customData?: any
 }
 
-/**
- * Convert CamelApp to a Pod-like object for hawtioService
- * Uses the first available pod from the CamelApp status
- */
-function camelAppToPod(camelApp: CamelApp | undefined): any | null {
-  if (!camelApp?.status?.pods || camelApp.status.pods.length === 0) {
-    return null
-  }
-
-  // Get the first pod
-  const pod = camelApp.status.pods[0]
-
-  return {
-    metadata: {
-      name: pod.name,
-      namespace: pod.namespace || camelApp.metadata?.namespace,
-      uid: pod.uid,
-    },
-    status: {
-      phase: pod.phase,
-    }
-  }
-}
-
 function podUid(pod: any | null): string | null {
   if (!pod) return null
   return pod.metadata?.uid ?? null
 }
 
 export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawtioTabProps> = props => {
-  const pod = camelAppToPod(props.obj)
   const [isLoading, setLoading] = useState<boolean>(true)
-  const podIdRef = useRef<string|null>(podUid(pod))
+  const podIdRef = useRef<string|null>(null)
   const [error, setError] = useState<Error | null>()
 
   // Ensure the correct theme for OpenShift version
   useOpenShiftTheme()
 
+  // Query actual Pod resources using the CamelApp selector
+  const resources = useK8sWatchResources<{
+    pods: any[]
+  }>({
+    pods: {
+      isList: true,
+      groupVersionKind: {
+        group: '',
+        version: 'v1',
+        kind: 'Pod'
+      },
+      namespaced: true,
+      namespace: props.obj?.metadata?.namespace,
+      selector: props.obj?.spec?.selector,
+    },
+  })
+
+  const pod = resources.pods.data && resources.pods.data.length > 0 ? resources.pods.data[0] : null
+
   useEffect(() => {
+    if (!resources.pods.loaded) {
+      return
+    }
+
     const newId = podUid(pod) ?? ''
     const podChanged = newId !== podIdRef.current
 
     if (isLoading) {
       const awaitService = async (p: any | null) => {
         if (!p) {
-          setError(new Error('No pods available in CamelApp'))
+          setError(new Error('No pods available for this CamelApp'))
           setLoading(false)
           return
         }
@@ -92,7 +91,7 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
 
         if (!hawtioService.isResolved() || hawtioService.getError()) {
           setError(new Error('Failure to initialize the HawtioService', { cause: hawtioService.getError() }))
-          setLoading(false) // error occurred so loading is done
+          setLoading(false)
           return
         }
 
@@ -103,17 +102,14 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
       awaitService(pod)
 
     } else if (podChanged) {
-      /*
-       * Ensure that we change state to refresh
-       * the page on a new pod
-       */
+      // Ensure that we change state to refresh the page on a new pod
       setLoading(true)
       podIdRef.current = newId
     }
 
-  }, [isLoading, pod])
+  }, [isLoading, pod, resources.pods.loaded])
 
-  if (isLoading) {
+  if (!resources.pods.loaded || isLoading) {
     return <ConsoleLoading />
   }
 
