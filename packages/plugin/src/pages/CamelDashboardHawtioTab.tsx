@@ -68,6 +68,8 @@ function ownerGvk(kind: string) {
 }
 
 export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawtioTabProps> = props => {
+  log.debug('CamelDashboardHawtioTab props:', JSON.stringify(props, null, 2))
+
   const [isLoading, setLoading] = useState<boolean>(true)
   const podIdRef = useRef<string|null>(null)
   const [error, setError] = useState<Error | null>()
@@ -168,12 +170,29 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
   }
 
   if (error) {
+    const debugInfo = {
+      ownerRef: ownerRef?.kind + '/' + ownerRef?.name,
+      ownerLoaded,
+      ownerSelector: owner?.spec?.selector,
+      totalPods: resources.pods.data?.length || 0,
+      jolokiaPods: jolokiaPods.length,
+      selectedPod: pod?.metadata?.name,
+      podAnnotations: pod?.metadata?.annotations,
+      errorCause: hawtioService.getError()?.message || 'N/A'
+    }
+
     return (
       <PageSection variant={PageSectionVariants.light}>
         <Card>
           <CardBody>
             <Alert variant='warning' title='Hawtio not available'>
               <p style={{ whiteSpace: 'pre-wrap' }}>{error.message}</p>
+              <details style={{ marginTop: '1rem' }}>
+                <summary>Debug Information</summary>
+                <pre style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                  {JSON.stringify(debugInfo, null, 2)}
+                </pre>
+              </details>
             </Alert>
           </CardBody>
         </Card>
