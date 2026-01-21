@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { Alert, Card, CardBody, PageSection, PageSectionVariants } from '@patternfly/react-core'
+import React, { Ref, useEffect, useRef, useState } from 'react'
+import { Alert, Card, CardBody, MenuToggle, MenuToggleElement, PageSection, PageSectionVariants, Select, SelectList, SelectOption, Toolbar, ToolbarContent, ToolbarItem } from '@patternfly/react-core'
+import { CubesIcon } from '@patternfly/react-icons'
 import '@patternfly/patternfly/patternfly.css'
 import { useOpenShiftTheme } from '../hooks'
 import { hawtioService } from '../hawtio-service'
@@ -50,6 +51,15 @@ function podUid(pod: any | null): string | null {
   return pod.metadata?.uid ?? null
 }
 
+function podName(pod: any | null): string {
+  if (!pod || !pod.metadata || !pod.metadata.name) return '<no pod>'
+  return pod.metadata.name
+}
+
+function findPodByName(pods: any[], name: string): any | null {
+  return pods.find(p => podName(p) === name) ?? null
+}
+
 function ownerGvk(kind: string) {
   switch (kind) {
     case 'Deployment':
@@ -73,6 +83,10 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
   const [isLoading, setLoading] = useState<boolean>(true)
   const podIdRef = useRef<string|null>(null)
   const [error, setError] = useState<Error | null>()
+
+  // Pod selection state
+  const [isPodSelectOpen, setPodSelectIsOpen] = useState<boolean>(false)
+  const [selectedPodName, setSelectedPodName] = useState<string | null>(null)
 
   // Ensure the correct theme for OpenShift version
   useOpenShiftTheme()
@@ -120,7 +134,20 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
 
   // Filter pods to only those with Jolokia port
   const jolokiaPods = resources.pods.data?.filter(p => connectionService.hasJolokiaPort(p)) || []
-  const pod = jolokiaPods.length > 0 ? jolokiaPods[0] : null
+
+  // Set default selected pod if not set or if the selected pod is no longer available
+  useEffect(() => {
+    if (jolokiaPods.length > 0) {
+      if (!selectedPodName || !findPodByName(jolokiaPods, selectedPodName)) {
+        setSelectedPodName(podName(jolokiaPods[0]))
+      }
+    } else {
+      setSelectedPodName(null)
+    }
+  }, [jolokiaPods.length])
+
+  // Get the currently selected pod
+  const pod = selectedPodName ? findPodByName(jolokiaPods, selectedPodName) : null
 
   useEffect(() => {
     if (!ownerLoaded || !resources.pods.loaded) {
@@ -165,6 +192,20 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
 
   }, [isLoading, pod, ownerLoaded, resources.pods.loaded])
 
+  // Pod selector handlers
+  const onToggleSelectPodClick = () => {
+    setPodSelectIsOpen(!isPodSelectOpen)
+  }
+
+  const onSelectPod = (_event: React.MouseEvent<Element, MouseEvent> | undefined, value: string | number | undefined) => {
+    const newPodName = value as string
+    if (newPodName !== selectedPodName) {
+      setSelectedPodName(newPodName)
+      setLoading(true) // Re-initialize hawtioService for the new pod
+    }
+    setPodSelectIsOpen(false)
+  }
+
   if (!ownerLoaded || !resources.pods.loaded || isLoading) {
     return <ConsoleLoading />
   }
@@ -202,6 +243,47 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
 
   return (
     <div style={{ minHeight: '800px', height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column' }}>
+      {jolokiaPods.length > 1 && (
+        <Toolbar style={{ paddingBottom: '1rem' }}>
+          <ToolbarContent>
+            <ToolbarItem>
+              <Select
+                id='camel-dashboard-pod-select'
+                isOpen={isPodSelectOpen}
+                selected={selectedPodName}
+                onSelect={onSelectPod}
+                onOpenChange={isOpen => setPodSelectIsOpen(isOpen)}
+                shouldFocusToggleOnSelect
+                toggle={(toggleRef: Ref<MenuToggleElement>) => (
+                  <MenuToggle
+                    id='camel-dashboard-pod-select-toggle'
+                    isDisabled={jolokiaPods.length === 0}
+                    variant='primary'
+                    ref={toggleRef}
+                    onClick={onToggleSelectPodClick}
+                    isExpanded={isPodSelectOpen}
+                    icon={<CubesIcon />}
+                  >
+                    Pod: {selectedPodName}
+                  </MenuToggle>
+                )}
+              >
+                <SelectList>
+                  {jolokiaPods.map(p => (
+                    <SelectOption
+                      value={podName(p)}
+                      key={podUid(p)}
+                      isSelected={selectedPodName === podName(p)}
+                    >
+                      {podName(p)}
+                    </SelectOption>
+                  ))}
+                </SelectList>
+              </Select>
+            </ToolbarItem>
+          </ToolbarContent>
+        </Toolbar>
+      )}
       <Hawtio />
     </div>
   )
