@@ -200,7 +200,11 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
     )
   }
 
-  return <Hawtio />
+  return (
+    <div style={{ minHeight: '800px', height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column' }}>
+      <Hawtio />
+    </div>
+  )
 }
 
 export default CamelDashboardHawtioTab
