@@ -10,13 +10,20 @@ import './hawtiomaintab.css'
 import { stack } from '../utils'
 import { log } from '../globals'
 import { ConsoleLoading } from './ConsoleLoading'
-import { useK8sWatchResources } from '@openshift-console/dynamic-plugin-sdk'
+import { useK8sWatchResources, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
+import { connectionService } from '../connection-service'
 
 interface CamelApp {
   metadata?: {
     name?: string
     namespace?: string
-    uid?: string
+    ownerReferences?: Array<{
+      apiVersion: string
+      kind: string
+      name: string
+      uid: string
+      controller?: boolean
+    }>
   }
   spec?: {
     selector?: {
@@ -28,8 +35,8 @@ interface CamelApp {
       name: string
       ready: boolean
       status: string
+      jolokiaEnabled?: boolean
     }>
-    phase?: string
   }
 }
 
@@ -43,6 +50,23 @@ function podUid(pod: any | null): string | null {
   return pod.metadata?.uid ?? null
 }
 
+function ownerGvk(kind: string) {
+  switch (kind) {
+    case 'Deployment':
+      return { group: 'apps', version: 'v1', kind: 'Deployment' }
+    case 'StatefulSet':
+      return { group: 'apps', version: 'v1', kind: 'StatefulSet' }
+    case 'DaemonSet':
+      return { group: 'apps', version: 'v1', kind: 'DaemonSet' }
+    case 'ReplicaSet':
+      return { group: 'apps', version: 'v1', kind: 'ReplicaSet' }
+    case 'CronJob':
+      return { group: 'batch', version: 'v1', kind: 'CronJob' }
+    default:
+      return { group: 'apps', version: 'v1', kind }
+  }
+}
+
 export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawtioTabProps> = props => {
   const [isLoading, setLoading] = useState<boolean>(true)
   const podIdRef = useRef<string|null>(null)
@@ -51,27 +75,53 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
   // Ensure the correct theme for OpenShift version
   useOpenShiftTheme()
 
-  // Query actual Pod resources using the CamelApp selector
+  // Get the owner resource (Deployment, StatefulSet, etc.)
+  const ownerRef = props.obj?.metadata?.ownerReferences?.[0]
+  const [owner, ownerLoaded] = useK8sWatchResource<any>(
+    ownerRef
+      ? {
+          name: ownerRef.name,
+          namespace: props.obj?.metadata?.namespace,
+          groupVersionKind: ownerGvk(ownerRef.kind),
+          isList: false,
+        }
+      : null
+  )
+
+  // Query pods using the owner's selector
   const resources = useK8sWatchResources<{
     pods: any[]
   }>({
-    pods: {
-      isList: true,
-      groupVersionKind: {
-        group: '',
-        version: 'v1',
-        kind: 'Pod'
-      },
-      namespaced: true,
-      namespace: props.obj?.metadata?.namespace,
-      selector: props.obj?.spec?.selector,
-    },
+    pods: ownerLoaded && owner && owner.spec?.selector
+      ? {
+          isList: true,
+          groupVersionKind: {
+            group: '',
+            version: 'v1',
+            kind: 'Pod'
+          },
+          namespaced: true,
+          namespace: props.obj?.metadata?.namespace,
+          selector: owner.spec.selector,
+        }
+      : {
+          isList: true,
+          groupVersionKind: {
+            group: '',
+            version: 'v1',
+            kind: 'Pod'
+          },
+          namespaced: false,
+          namespace: '',
+        }
   })
 
-  const pod = resources.pods.data && resources.pods.data.length > 0 ? resources.pods.data[0] : null
+  // Filter pods to only those with Jolokia port
+  const jolokiaPods = resources.pods.data?.filter(p => connectionService.hasJolokiaPort(p)) || []
+  const pod = jolokiaPods.length > 0 ? jolokiaPods[0] : null
 
   useEffect(() => {
-    if (!resources.pods.loaded) {
+    if (!ownerLoaded || !resources.pods.loaded) {
       return
     }
 
@@ -81,7 +131,11 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
     if (isLoading) {
       const awaitService = async (p: any | null) => {
         if (!p) {
-          setError(new Error('No pods available for this CamelApp'))
+          const totalPods = resources.pods.data?.length || 0
+          const msg = totalPods > 0
+            ? `No pods with Jolokia port found. This CamelApp has ${totalPods} pod(s) but none expose Jolokia on port 8778.\n\nTo enable Hawtio integration, ensure your Camel application exposes a Jolokia endpoint.`
+            : 'No pods available for this CamelApp.'
+          setError(new Error(msg))
           setLoading(false)
           return
         }
@@ -107,9 +161,9 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
       podIdRef.current = newId
     }
 
-  }, [isLoading, pod, resources.pods.loaded])
+  }, [isLoading, pod, ownerLoaded, resources.pods.loaded])
 
-  if (!resources.pods.loaded || isLoading) {
+  if (!ownerLoaded || !resources.pods.loaded || isLoading) {
     return <ConsoleLoading />
   }
 
@@ -118,13 +172,8 @@ export const CamelDashboardHawtioTab: React.FunctionComponent<CamelDashboardHawt
       <PageSection variant={PageSectionVariants.light}>
         <Card>
           <CardBody>
-            <Alert variant='danger' title='Error occurred while loading'>
-              <textarea
-                readOnly
-                style={{ width: '100%', height: '100%', resize: 'none', background: 'transparent', border: 'none' }}
-              >
-                {stack(error)}
-              </textarea>
+            <Alert variant='warning' title='Hawtio not available'>
+              <p style={{ whiteSpace: 'pre-wrap' }}>{error.message}</p>
             </Alert>
           </CardBody>
         </Card>
