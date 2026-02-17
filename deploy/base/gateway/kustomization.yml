@@ -1,4 +1,4 @@
-namespace: placeholder
+namespace: camel-dashboard
 
 resources:
 - configmap-hawtio-rbac.yml
@@ -6,3 +6,7 @@ resources:
 - service-gateway.yml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+images:
+- name: quay.io/hawtio/online-console-plugin-gateway
+  newName: image-registry.openshift-image-registry.svc:5000/camel-dashboard/online-console-plugin-gateway
+  newTag: 0.6.0.7

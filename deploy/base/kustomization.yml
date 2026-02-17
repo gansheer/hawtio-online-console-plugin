@@ -1,4 +1,4 @@
-namespace: placeholder
+namespace: camel-dashboard
 
 resources:
 - ./gateway

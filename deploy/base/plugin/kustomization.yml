@@ -1,4 +1,4 @@
-namespace: placeholder
+namespace: camel-dashboard
 
 resources:
 - deployment-plugin.yml
@@ -6,3 +6,7 @@ resources:
 - plugin.yml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+images:
+- name: quay.io/hawtio/online-console-plugin
+  newName: image-registry.openshift-image-registry.svc:5000/camel-dashboard/online-console-plugin
+  newTag: 0.6.0.7
